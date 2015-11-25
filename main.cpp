@@ -8,17 +8,62 @@
 #include <cmath>
 #include <fstream>
 #include <algorithm>
+#define TIMERMSECS 33
 using namespace std;
 const int width = 320;
 const int height = 240;
 const int Ratio = 10;
 int tailLength = 1;
+int score = 0;
+int color;
 bool gameOver = false;
+bool failed = false;
+int lastMove; // 1 = Greedy ; 2 == Optim
 struct position
 {
     int x;
     int y;
 } head , food , tail[5000];
+int startTime;
+int prevTime;
+static void animate(int value)
+{
+    // Set up the next timer tick (do this first)
+    glutTimerFunc(TIMERMSECS, animate, 0);
+
+    // Measure the elapsed time
+    int currTime = glutGet(GLUT_ELAPSED_TIME);
+    int timeSincePrevFrame = currTime - prevTime;
+    int elapsedTime = currTime - startTime;
+
+    // ##### REPLACE WITH YOUR OWN GAME/APP MAIN CODE HERE #####
+
+    // Rotate the triangle
+    //rot = (ROTRATE / 1000) * elapsedTime;
+
+    // ##### END OF GAME/APP MAIN CODE #####
+
+
+
+    // Force a redisplay to render the new image
+    glutPostRedisplay();
+
+    prevTime = currTime;
+}
+
+void displayScore ()
+{
+    char *c = "Score: ";
+    char *score_text;
+    itoa(score,score_text,10);
+    glColor3f(0.0, 0.5 , 1.0);
+    glRasterPos2f(20 , height-2);
+    for(int i = 0 ; i < strlen(c) ; ++i)
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, c[i]);
+    for(int i = 0 ; i < strlen(score_text); ++i)
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, score_text[i]);
+}
+char* activeFunction;
 void GenerateRandomFruitPos ()
 {
     char x[100];
@@ -37,6 +82,9 @@ void GenerateRandomFruitPos ()
         food.x -= 20;
     if(food.y >= height-10)
         food.y -=20;
+    for(int k = 0 ; k <= tailLength ; ++k)
+        if(food.x == tail[k].x && food.y == tail[k].y)
+            GenerateRandomFruitPos();
     itoa(food.x, x , 10);
     itoa(food.y, y , 10);
     printf("\nFood: %s , %s\n",x,y);
@@ -59,12 +107,16 @@ void displayEdges ()
     glVertex2i(10,height-10);
     glVertex2i(width-10,height-10);
     glVertex2i(width-10,10);
+    glutPostRedisplay();
     glEnd();
-    glFlush();
+    //glFlush();
 }
 void showSnake ()
 {
-    glColor3f(1.0,0.0,0.0);
+    if(color == 1)
+        glColor3f(1.0,0.0,0.0);
+    if(color ==2)
+        glColor3f(0.0,1.0,0.0);
     glBegin(GL_POINTS);
     int i,j;
     for(i = 0 ; i < width ; ++ i)
@@ -73,22 +125,27 @@ void showSnake ()
                 if (tail[k].x == i && tail[k].y == j)
                     glVertex2f(tail[k].x,tail[k].y);
     glEnd();
-    glFlush();
-    glutPostRedisplay();
+    //glFlush();
+    //glutPostRedisplay();
 }
 void displayCB()
 {
+    //displayScore();
     displayEdges();
     glPointSize(Ratio);
     glBegin(GL_POINTS);
     glColor3f(255, 255 , 0);
     glVertex2f(food.x,food.y);
     glColor3f(0.0,1.0,0.0);
+    //glutPostRedisplay();
     glEnd();
     showSnake();
+    displayScore();
     glFlush();
     glutPostRedisplay();
 }
+int willBeInBox(int , int);
+int moveOk (int , int);
 char lastPressed;
 void Move ()
 {
@@ -123,12 +180,11 @@ void myIdleFunc ()
 {
     char x[100];
     char y[100];
-    /*itoa(head.x,x,10);
-    itoa(head.y,y,10);
-    //printf("\n(%s , %s)\n",x,y);*/
+    itoa(tail[0].x,x,10);
+    itoa(tail[0].y,y,10);
+    //printf("\n(%s , %s)\n",x,y);
     if(inBox() == false)
         exit(0);
-    Sleep(Ratio*3*width/height);
     int posx,posy;
     posx = tail[0].x;
     posy = tail[0].y;
@@ -163,6 +219,7 @@ void myIdleFunc ()
     {
         GenerateRandomFruitPos();
         ++tailLength;
+        score += 10;
     }
     position last,last2;
     int i;
@@ -179,7 +236,9 @@ void myIdleFunc ()
         last.x = last2.x;
         last.y = last2.y;
     }
-    glutPostRedisplay();
+    //glutPostRedisplay();
+    Sleep(30);
+    glFlush();
 }
 void keyCB(unsigned char key, int x, int y)
 {
@@ -202,6 +261,19 @@ void keyCB(unsigned char key, int x, int y)
         break;
     }
 }
+char steps[1000];
+int k = 1;
+char rev_step (char x)
+{
+    if(x == 'w')
+        return 's';
+    if(x == 's')
+        return 'w';
+    if(x == 'd')
+        return 'a';
+    if(x=='a')
+        return 'd';
+}
 int Max (int a , int b , int c , int d)
 {
     if(a > b && a > c && a> d)
@@ -214,93 +286,220 @@ int Max (int a , int b , int c , int d)
 }
 int willBeInBox(int posx, int posy)
 {
-    return (posx > 10 && posx < width-10 && posy > 10 && posy < height-10);
+    return (posx >= 20 && posx <= width-20 && posy >= 20 && posy <= height-20);
 }
-void MoveAI ()
+int willNotBiteItSelf(int , int);
+void getToFood();
+void GreedySnake();
+int MoveAI ()
 {
     int posx,posy;
     posx = tail[0].x;
     posy = tail[0].y;
+    printf("%d , %d \n",posx,posy);
     switch(lastPressed)
     {
     case 'w':
-        if(doesntEatItself(posx,posy+Ratio))
+        if(willNotBiteItSelf(posx,posy+Ratio) && willBeInBox(posx,posy+Ratio))
         {
             tail[0].y += Ratio;
+            return 1;
             break;
         }
+        //break;
     case 's':
-        if(doesntEatItself(posx,posy-Ratio))
+        if(willNotBiteItSelf(posx,posy-Ratio) && willBeInBox(posx,posy-Ratio))
         {
             tail[0].y -= Ratio;
+            return 1;
             break;
         }
+        //break;
     case 'a':
-        if(doesntEatItself(posx-Ratio,posy))
+        if(willNotBiteItSelf(posx-Ratio,posy) && willBeInBox(posx-Ratio,posy))
         {
             tail[0].x -= Ratio;
+            return 1;
             break;
         }
+        //break;
     case 'd':
-        if(doesntEatItself(posx+Ratio,posy))
+        if(willNotBiteItSelf(posx+Ratio,posy) && willBeInBox(posx+Ratio,posy))
         {
             tail[0].x += Ratio;
+            return 1;
             break;
         }
+    default:
+    {
+        break;
     }
+    }
+    char x[100];
+    char y[200];
+    itoa(tail[0].x,x,10);
+    itoa(tail[0].y,y,10);
+    //printf("\n(%s , %s)",x,y);
+    //system("pause");
 }
-int make_decision ()
+int moveOk (int posx, int posy)
 {
-    int posx , posy;
+    return (willBeInBox(posx,posy) && willNotBiteItSelf(posx,posy));
+}
+void GreedySnake();
+void getToFood ()
+{
+    color = 2;
+    lastMove = 2;
+    int posx,posy;
     posx = tail[0].x;
     posy = tail[0].y;
-    if(tail[0].x < food.x)
-    {
-        if(tail[0].x + Ratio > width - 10)
-            if(tail[0].y + Ratio < height - 10)
-                lastPressed = 'w';
-            else lastPressed = 's';
-        else lastPressed = 'd';
-        return 1;
-    }
-    if(tail[0].x > food.x)
-    {
-        if(tail[0].x - Ratio < 10)
-            if(tail[0].y + Ratio < height - 10)
-                lastPressed = 'w';
-            else lastPressed = 's';
-        else lastPressed = 'a';
-        return 1;
-    }
-    if(tail[0].x == food.x && tail[0].y < food.y)
-    {
-        if(tail[0].y + Ratio > height - 10 )
-            if(tail[0].x + Ratio < width - 10)
-                lastPressed = 'd';
-            else lastPressed = 'a';
-        lastPressed = 'w';
-        return 1;
-    }
-    if(tail[0].x == food.x && tail[0].y > food.y)
-    {
-        if(tail[0].y - Ratio < 10 )
-            if(tail[0].x + Ratio < width - 10)
-                lastPressed = 'd';
-            else lastPressed = 'a';
+    if (tail[0].x < food.x && moveOk(posx+Ratio,posy))
+        lastPressed ='d';
+    else if (tail[0].x > food.x && moveOk (posx-Ratio,posy))
+        lastPressed ='a';
+    else if(tail[0].x == food.x && tail[0].y < food.y && moveOk (posx,posy+Ratio))
+        lastPressed ='w';
+    else if(tail[0].x == food.x && tail[0].y > food.y && moveOk (posx,posy-Ratio))
         lastPressed = 's';
-        return 1;
+    else
+    {
+        failed = true;
+        GreedySnake();
     }
-
+}
+int currentWidth = width;
+int currentHeight = height;
+int currentMove = 1;
+int getHeight();
+void ReachMostLeft ()
+{
+    if(tail[0].x > 20 && moveOk(tail[0].x-10,tail[0].y))
+        lastPressed = 'a';
+}
+void ReachTop ()
+{
+    if(tail[0].y < getHeight() && moveOk(tail[0].x,tail[0].y+10))
+        lastPressed = 'w';
+}
+bool MostLeft ()
+{
+    return tail[0].x == 20;
+}
+bool MostTop ()
+{
+    return tail[0].y == currentHeight - 20;
+}
+void ReachMostRight ()
+{
+    if(tail[0].x < width - 20 && moveOk(tail[0].x+10,tail[0].y))
+        lastPressed = 'd';
+}
+bool MostRight ()
+{
+    return tail[0].x == width - 20;
+}
+void MoveDown ()
+{
+    if(tail[0].y > getHeight() && moveOk(tail[0].x,tail[0].y-10))
+        lastPressed = 's';
+}
+int willNotBiteItSelf (int posx ,int posy)
+{
+    int k;
+    if(tailLength <= 5)
+        return 1;
+    for(k = 1 ; k <= tailLength ; ++k)
+        if(tail[k].x == posx && tail[k].y == posy)
+            return 0;
+    return 1;
+}
+int getHeight ()
+{
+    for(k = tailLength ; k >= 1 ; --k)
+        if(tail[0].y == tail[k].y)
+            return tail[k].y;
+    return -1;
+}
+void GreedySnake ()
+{
+    /*if(getHeight() == -1)
+        getToFood();*/
+        color = 1;
+        lastMove = 1;
+        if(tail[0].x == width - 20 && tail[0].y == 20)
+        {
+            currentMove = 99;
+        }
+        if(currentMove == 99)
+        {
+            ReachTop();
+            if(tail[0].y != height - 20)
+                currentMove = 99;
+            else
+            {
+                failed = false;
+                currentMove = 3;
+            }
+        }
+        if (currentMove == 1)
+        {
+            ReachMostLeft();
+            if(!MostLeft())
+                currentMove = 1;
+            else currentMove = 2;
+        }
+        if (currentMove == 2)
+        {
+            ReachTop();
+            if(!MostTop())
+                currentMove = 2;
+            else currentMove = 3;
+        }
+        if (currentMove == 3)
+        {
+            if(tail[0].x != width - 20)
+            {
+                ReachMostRight();
+                currentMove = 3;
+            }
+            else currentMove =4;
+        }
+        else if (currentMove == 4)
+        {
+            MoveDown();
+            currentMove = 5;
+        }
+        else if (currentMove == 5)
+        {
+            ReachMostLeft();
+            if(MostLeft())
+                currentMove = 6;
+            //else getToFood();
+        }
+        else if (currentMove == 6)
+        {
+            MoveDown();
+            currentMove = 3;
+        }
 }
 void Idle_AI ()
 {
-    make_decision();
+    //make_decision();
+    //if(tailLength*Ratio < width - 20 && failed == false)
+      //  getToFood();
+    //else
+        GreedySnake();
     MoveAI();
-    Sleep(10);  
     if(tail[0].x == food.x && tail[0].y == food.y)
     {
         GenerateRandomFruitPos();
         ++tailLength;
+        score += 10;
+        /*if(getHeight() == -1)
+            getToFood();
+        else GreedySnake();*/
+        GreedySnake();
     }
     position last,last2;
     int i;
@@ -317,6 +516,10 @@ void Idle_AI ()
         last.x = last2.x;
         last.y = last2.y;
     }
+    Sleep(30);
+    glFlush();
+    //startTime = glutGet(GLUT_ELAPSED_TIME);
+    //prevTime = startTime;
 }
 int main(int argc, char *argv[])
 {
@@ -328,13 +531,25 @@ int main(int argc, char *argv[])
     tail[0].x = width / 2;
     tail[0].y = height /2;
     GenerateRandomFruitPos();
+    glutInitWindowPosition((GetSystemMetrics(SM_CXSCREEN)-width)*3/4,
+                           (GetSystemMetrics(SM_CYSCREEN)-height)/2);
     glutInitWindowSize(width,height);
     glutCreateWindow("Snake Game");
     glClearColor(0.0,0.0,0.0,0.0);
-    gluOrtho2D(0,width,0,height);
+    gluOrtho2D(0,width,0,height+50);
     glutDisplayFunc(displayCB);
-    //glutKeyboardFunc(keyCB);
+    char *s = argv[1];
+    //if(argc == 2 && strcmp(s,"ai")==0)
     glutIdleFunc(Idle_AI);
+    /*else
+    {
+        glutIdleFunc(myIdleFunc);
+        glutKeyboardFunc(keyCB);
+    }*/
+    glutTimerFunc(TIMERMSECS, animate, 0);
+    startTime = glutGet(GLUT_ELAPSED_TIME);
+    prevTime = startTime;
     glutMainLoop();
     return 0;
+
 }
